@@ -5,6 +5,19 @@ const bcrypt = require('bcrypt');
 const session = require('express-session'); // Für Session-Handling
 app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // Wichtig für POST-Requests mit Formulardaten
+const path = require('path');
+
+// Standard-Views (öffentliche Seiten)
+app.set('views', path.join(__dirname, 'views'));
+
+
+
+function isAuthenticated(req, res, next) {
+    if (req.session && req.session.spieler) {
+        return next(); // Nutzer ist eingeloggt, fahre fort
+    }
+    res.redirect('/anmeldung'); // Falls nicht eingeloggt, zur Anmeldung weiterleiten
+}
 
 // Session einrichten
 app.use(session({
@@ -25,6 +38,9 @@ app.use(express.static('public'));
 app.get('/anmeldung', (req, res) => {
     res.render('anmeldung');
 });
+
+
+
 // **POST-Route für Login**
 app.post('/anmeldung', (req, res) => {
     const { spielername, passwort } = req.body;
@@ -55,13 +71,17 @@ app.post('/anmeldung', (req, res) => {
 
         // Session speichern
         req.session.spieler = {
-            id: benutzer.id,
+            id: benutzer.nutzer_id,
             spielername: benutzer.spielername,
             mail: benutzer.mail
         };
 
+        // Session-Cookie mit einer Ablaufzeit von 7 Tagen setzen
+        req.session.cookie.maxAge = 7 * 24 * 60 * 60 * 1000; // 7 Tage in Millisekunden
+
+
         console.log('Login erfolgreich:', req.session.spieler);
-        res.redirect('/index'); // Erfolgreich eingeloggt -> Weiterleitung
+        res.redirect('/spieler');// Erfolgreich eingeloggt -> Weiterleitung
     });
 });
 
@@ -98,7 +118,7 @@ app.post('/register', async (req, res) => {
                 return res.status(500).send('Fehler beim Speichern des Benutzers');
             }
             console.log('Neuer Benutzer hinzugefügt, ID:', results.insertId);
-            res.redirect('/login'); // Weiterleitung zur Login-Seite
+            res.redirect('/protected views/index'); // Weiterleitung zur Login-Seite
         });
 
     } catch (error) {
@@ -108,14 +128,34 @@ app.post('/register', async (req, res) => {
 });
 
 // Route für die Spieler-Seite
-app.get('/spieler', (req, res) => {
-    connection.query('SELECT * FROM spieler', (err, results) => {
+app.get('/spieler', isAuthenticated,(req, res) => {
+
+    const user_id = req.session.spieler.id;
+    connection.query("SELECT * FROM spieler WHERE nutzer_id =?",[user_id], (err, results) => {
         if (err) {
             console.error('Fehler bei der Abfrage:', err);
             res.status(500).send('Fehler bei der Datenbankabfrage');
             return;
         }
-        res.render('spieler', { spieler: results });
+        res.render("protected views\\spieler", { spieler: results });
+    });
+});
+
+app.post('/spielerdaten-aktualisieren', isAuthenticated,(req, res) => {
+    const nachname = req.body.nachname;
+    const mail = req.body.mail;
+    const user_id = req.session.spieler.id;  // ID des zu aktualisierenden Datensatzes
+
+    const sql = "UPDATE spieler SET nachname = ?, mail = ? WHERE nutzer_id = ?";
+    const values = [nachname, mail, user_id];
+
+    connection.query(sql, values, (err, result) => {
+        if (err) {
+            console.error('Fehler beim Update:', err);
+            return;
+        } else {
+            res.redirect("/spieler");
+        }
     });
 });
 
